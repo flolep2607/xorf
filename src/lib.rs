@@ -52,7 +52,9 @@
 //!
 //! - It is a pre-condition that all filters are constructed from a data structure containing no
 //!   duplicate keys. You must perform any de-duplication needed yourself before constructing a
-//!   filter.
+//!   filter. (Release builds of the `BinaryFuse` filters tolerate repeats anyway: after a few
+//!   failed tries they deduplicate the keys and build from those, so the filter contains every
+//!   key. Debug builds panic, as the other filters do.)
 //!
 //! ## FAQ
 //!

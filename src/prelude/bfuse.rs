@@ -162,7 +162,9 @@ macro_rules! impl_fingerprint {
 }
 impl_fingerprint!(u8, u16, u32);
 
-/// The message of the error returned when a key appears twice (see [`construct`]).
+/// The message of the error [`construct`] returns when a key appears twice. The filter
+/// constructors (`bfuse_from_impl`) catch it, deduplicate the keys and build again, so callers
+/// of `BinaryFuse8/16/32` never see it.
 pub const DUPLICATE_KEYS: &str =
     "Binary Fuse filters must be constructed from a collection containing all distinct keys.";
 
@@ -477,10 +479,11 @@ where
         seed = splitmix64(&mut rng);
 
         // Peeling a set with a repeated key fails at every seed (both copies land in the same
-        // slots whatever the seed), and the other retries are whole builds: a thousand of them
-        // took 3.7 s for 100,000 keys and 100 repeats. Honest failures are rare (a try in fifty
+        // slots whatever the seed), and the other retries are whole builds: 0.13 spent 4.5 s on
+        // 100,000 keys and 100 repeats before giving up. Honest failures are rare (a try in fifty
         // for a handful of keys, none in 20,000 filters of 30,000 keys needed a fifth), so
-        // after the eighth, look for the repeat.
+        // after the eighth, look for the repeat. The fingerprint array is sized for `keys.len()`
+        // by the caller, so a build of the deduplicated keys is the caller's to make.
         if iteration == 8 {
             let mut sorted: Vec<u64> = keys.clone().collect();
             sorted.sort_unstable();
@@ -532,7 +535,7 @@ macro_rules! bfuse_from_impl(
             use $crate::make_block;
             use $crate::{
                 make_fp_block,
-                prelude::bfuse::{construct, fingerprints_len},
+                prelude::bfuse::{construct, fingerprints_len, DUPLICATE_KEYS},
             };
 
             #[cfg(debug_assertions)] {
@@ -542,7 +545,17 @@ macro_rules! bfuse_from_impl(
 
             let fp_array_len = fingerprints_len($keys.len());
             let mut fingerprints: Box<[$fpty]> = make_fp_block!(fp_array_len);
-            let built = construct($scratch, $keys, &mut fingerprints, $max_iter);
+            let mut built = construct($scratch, $keys.clone(), &mut fingerprints, $max_iter);
+            if built == Err(DUPLICATE_KEYS) {
+                // A repeated key can never peel. Build from the distinct keys instead; the
+                // filter then contains every key, which is what the caller meant.
+                let mut distinct: Vec<u64> = $keys.collect();
+                distinct.sort_unstable();
+                distinct.dedup();
+                let fp_array_len = fingerprints_len(distinct.len());
+                fingerprints = make_fp_block!(fp_array_len);
+                built = construct($scratch, distinct.iter().copied(), &mut fingerprints, $max_iter);
+            }
             $scratch.trim();
             let descriptor = built?;
             Ok(Self { descriptor, fingerprints })
@@ -579,8 +592,9 @@ mod test {
     use super::*;
     use crate::splitmix64::splitmix64;
 
-    /// A repeated key fails the peeling at every seed; that has to be an error after a few
-    /// builds, not a thousand (which took 3.7 s for 100,000 keys and 100 repeats).
+    /// A repeated key fails the peeling at every seed; `construct` has to say so after a few
+    /// builds, not a thousand (which took 3.7 s for 100,000 keys and 100 repeats), and the
+    /// constructors then build from the distinct keys.
     #[test]
     fn repeated_keys_fail_fast() {
         let mut state = 5;
