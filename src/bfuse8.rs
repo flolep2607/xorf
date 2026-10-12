@@ -2,7 +2,9 @@
 
 use crate::{
     DmaSerializable, Filter, FilterRef, bfuse_contains_impl, bfuse_from_impl,
-    prelude::bfuse::{Descriptor, parse_bfuse_descriptor, serialize_bfuse_descriptor},
+    prelude::bfuse::{
+        BinaryFuseScratch, Descriptor, parse_bfuse_descriptor, serialize_bfuse_descriptor,
+    },
 };
 use alloc::{boxed::Box, vec::Vec};
 use core::convert::TryFrom;
@@ -92,7 +94,20 @@ impl BinaryFuse8 {
     where
         T: ExactSizeIterator<Item = u64> + Clone,
     {
-        bfuse_from_impl!(keys fingerprint u8, max iter 1_000)
+        Self::try_from_iterator_in(keys, &mut BinaryFuseScratch::default())
+    }
+
+    /// Like [`try_from_iterator`](Self::try_from_iterator), building in `scratch`, which keeps its
+    /// arrays for the next build. The filter is the same, so building many filters one after
+    /// another (a thread's share of a pack's shards) allocates the working arrays once.
+    pub fn try_from_iterator_in<T>(
+        keys: T,
+        scratch: &mut BinaryFuseScratch,
+    ) -> Result<Self, &'static str>
+    where
+        T: ExactSizeIterator<Item = u64> + Clone,
+    {
+        bfuse_from_impl!(keys fingerprint u8, max iter 1_000, scratch scratch)
     }
 }
 
@@ -137,6 +152,51 @@ impl DmaSerializable for BinaryFuse8 {
 pub struct BinaryFuse8Ref<'a> {
     descriptor: Descriptor,
     fingerprints: &'a [u8],
+}
+
+impl<'a> BinaryFuse8Ref<'a> {
+    /// A filter over `fingerprints`, which are read where they are: no copy, so they can be a
+    /// memory map. `Err` when the descriptor would read past them (a corrupt file), which
+    /// [`FilterRef::from_dma`] would only find by panicking in `contains`.
+    ///
+    /// ```
+    /// use xorf::{BinaryFuse8, BinaryFuse8Ref, DmaSerializable, Filter};
+    ///
+    /// let keys: Vec<u64> = (0..1000).collect();
+    /// let owned = BinaryFuse8::try_from(&keys).unwrap();
+    /// let view = BinaryFuse8Ref::new(owned.descriptor.clone(), owned.dma_fingerprints()).unwrap();
+    /// assert!(keys.iter().all(|k| view.contains(k)));
+    /// ```
+    pub const fn new(descriptor: Descriptor, fingerprints: &'a [u8]) -> Result<Self, &'static str> {
+        if !descriptor.fits(fingerprints.len()) {
+            return Err("Binary Fuse descriptor does not fit its fingerprints.");
+        }
+        Ok(Self {
+            descriptor,
+            fingerprints,
+        })
+    }
+
+    /// A filter over `blob`: [`Descriptor::DMA_LEN`] bytes of descriptor (what
+    /// [`DmaSerializable::dma_copy_descriptor_to`] writes) and then the fingerprints (what
+    /// [`DmaSerializable::dma_fingerprints`] returns), back to back, as a file keeping many
+    /// filters lays them out. Nothing is copied. `Err` when the blob is too short for its descriptor.
+    pub fn from_blob(blob: &'a [u8]) -> Result<Self, &'static str> {
+        let (descriptor, fingerprints) = blob
+            .split_first_chunk::<{ Descriptor::DMA_LEN }>()
+            .ok_or("Binary Fuse blob is shorter than its descriptor.")?;
+        Self::new(parse_bfuse_descriptor(descriptor), fingerprints)
+    }
+
+    /// The descriptor.
+    pub const fn descriptor(&self) -> &Descriptor {
+        &self.descriptor
+    }
+
+    /// The fingerprints, as they were given.
+    pub const fn fingerprints(&self) -> &'a [u8] {
+        self.fingerprints
+    }
 }
 
 impl<'a> Filter<u64> for BinaryFuse8Ref<'a> {

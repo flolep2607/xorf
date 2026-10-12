@@ -2,7 +2,9 @@
 
 use crate::{
     DmaSerializable, Filter, FilterRef, bfuse_contains_impl, bfuse_from_impl,
-    prelude::bfuse::{Descriptor, parse_bfuse_descriptor, serialize_bfuse_descriptor},
+    prelude::bfuse::{
+        BinaryFuseScratch, Descriptor, parse_bfuse_descriptor, serialize_bfuse_descriptor,
+    },
 };
 use alloc::{boxed::Box, vec::Vec};
 use core::convert::TryFrom;
@@ -92,7 +94,20 @@ impl BinaryFuse32 {
     where
         T: ExactSizeIterator<Item = u64> + Clone,
     {
-        bfuse_from_impl!(keys fingerprint u32, max iter 1_000)
+        Self::try_from_iterator_in(keys, &mut BinaryFuseScratch::default())
+    }
+
+    /// Like [`try_from_iterator`](Self::try_from_iterator), building in `scratch`, which keeps its
+    /// arrays for the next build. The filter is the same, so building many filters one after
+    /// another (a thread's share of a pack's shards) allocates the working arrays once.
+    pub fn try_from_iterator_in<T>(
+        keys: T,
+        scratch: &mut BinaryFuseScratch,
+    ) -> Result<Self, &'static str>
+    where
+        T: ExactSizeIterator<Item = u64> + Clone,
+    {
+        bfuse_from_impl!(keys fingerprint u32, max iter 1_000, scratch scratch)
     }
 }
 

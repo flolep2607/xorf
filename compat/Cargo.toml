@@ -1,0 +1,13 @@
+[package]
+name = "xorf-compat"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Tests that filters built by xorf 0.13.0 read the same through this crate."
+
+[dev-dependencies]
+xorf = { path = "..", default-features = false, features = ["binary-fuse"] }
+xorf013 = { package = "xorf", version = "=0.13.0", default-features = false, features = ["binary-fuse"] }
+
+# not a member of the root workspace: see tests/xorf_0_13.rs
+[workspace]

@@ -1,5 +1,6 @@
 [workspace]
 members = [".", "analysis"]
+exclude = ["compat"]
 resolver = "3"
 
 [package]
@@ -85,6 +86,10 @@ uniform-random = ["rand"]
 
 [[test]]
 name = "boundary_size_construction"
+required-features = ["binary-fuse"]
+
+[[test]]
+name = "binary_fuse8_view"
 required-features = ["binary-fuse"]
 
 [[test]]

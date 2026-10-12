@@ -110,7 +110,7 @@ pub use fuse16::Fuse16;
 pub use fuse32::Fuse32;
 pub use hash_proxy::HashProxy;
 #[cfg(feature = "binary-fuse")]
-pub use prelude::Descriptor;
+pub use prelude::{Descriptor, bfuse::BinaryFuseScratch};
 pub use xor8::Xor8;
 pub use xor16::Xor16;
 pub use xor32::Xor32;
